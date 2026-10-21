@@ -84,8 +84,8 @@ aws/         IAM policy for the read-only Snowflake user · S3 → Snowpipe noti
 tests/       test_guard.py · eval_agent.py · fixture from a real profiling run
 ```
 The dbt project, stored procedures and source data live in the migration project
-(`~/Downloads/Lavanya/snowflake-healthcare-data-migration`), unchanged except one line: source tests are
-filtered to the batch being run.
+([snowflake-healthcare-data-migration](https://github.com/Lavanya-developer0309/snowflake-healthcare-data-migration)),
+unchanged except one line: source tests are filtered to the batch being run.
 
 ## Lessons (what went wrong and how it was fixed)
 - **AWS Free plan accounts sit in an AWS-managed organisation**: Sydney only, no IAM console passwords, and
@@ -98,6 +98,10 @@ filtered to the batch being run.
 - **Two Airflow runs overlapped** despite `max_active_runs=1` — fixed with an atomic S3 lock (`IfNoneMatch="*"`).
 - **A 16 GB Mac running an 8B model swaps hard**; Airflow killed a healthy task. Fewer workers, a 20-minute
   heartbeat timeout, smaller model context (8k) and stale-lock recovery fixed it.
+
+## Related projects
+- [snowflake-healthcare-data-migration](https://github.com/Lavanya-developer0309/snowflake-healthcare-data-migration) — the dbt + Snowflake migration this pipeline runs
+- [ai-data-profiling-agent](https://github.com/Lavanya-developer0309/ai-data-profiling-agent) — profiling web tool; hosts the Pipeline page (approvals + agent decisions)
 
 ## Cost
 AWS Free plan (no charges possible; S3/SNS usage within credits) · Snowflake trial credits (XS warehouse, 60 s auto-suspend,
