@@ -1,0 +1,14 @@
+{
+ "columns_profiled": 65,
+ "key_column_breaches": [],
+ "concerns": [],
+ "optional_columns": [
+  "SRC_MEMBER.MIDDLE_INITIAL",
+  "SRC_PROVIDER.FIRST_NAME",
+  "SRC_PROVIDER.LAST_NAME",
+  "SRC_PROVIDER.ORGANIZATION_NAME",
+  "SRC_CLAIM_HEADER.SECONDARY_DIAG_CODE",
+  "SRC_CLAIM_LINE.PROCEDURE_MODIFIER"
+ ],
+ "minor_issues": 10
+}

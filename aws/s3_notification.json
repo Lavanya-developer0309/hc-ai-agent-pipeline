@@ -1,0 +1,2 @@
+{"QueueConfigurations": [{"Id": "snowpipe-incoming", "QueueArn": "arn:aws:sqs:ap-southeast-2:220929238372:sf-snowpipe-AIDATG4DIUVSLETJ5L24N-HRKzMsafRbX65eLWFP-NGA", "Events": ["s3:ObjectCreated:*"],
+  "Filter": {"Key": {"FilterRules": [{"Name": "prefix", "Value": "incoming/"}, {"Name": "suffix", "Value": ".txt"}]}}}]}
