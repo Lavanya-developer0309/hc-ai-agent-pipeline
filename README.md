@@ -136,7 +136,7 @@ What BATCH_007's agent actually did (from `AUDIT.AGENT_DECISION_LOG`):
 | 1 | `check_batch_files` | All 5 expected files in S3, none empty? *(hard rule)* | 5 of 5 found | 15 s |
 | 2 | `wait_for_snowpipe` | Polls `COPY_HISTORY` until every file is loaded; after 2 min runs `ALTER PIPE … REFRESH` once; gives up after 10 min | all 5 `Loaded`, 0 rejected | 16 s |
 | 3 | `register_batch` | `SP_REGISTER_S3_BATCH`: batch control → RUNNING, row counts → `MIG_LOAD_LOG` | GROUP 60 · MEMBER 3,938 · PROVIDER 350 · CLAIM_HEADER 8,000 · CLAIM_LINE 15,962 | 13 s |
-| 4 | `check_load` | Every file has rows; Snowpipe rejected ≤ 1 % *(hard rule)* | ok | 15 s |
+| 4 | `check_load` | Every file has rows; Snowpipe rejected ≤ 1 %; every row has the header's column count *(hard rules)* | ok | 15 s |
 | 5 | `profile_source` | `SP_PROFILE_ALL` profiles every column (nulls, lengths, invalid characters, bad dates…); code classifies the results | 65 columns: 0 breaches, 0 concerns, 10 minor issues, 5 optional columns empty | 48 s |
 | 6 | `dbt_build` | `dbt build --vars {batch_id}`: staging → mapping rules → Facets-like tables → tests → keyword files | 31 models ok, 73 tests pass, 13 warnings, 0 errors | 105 s |
 | 7 | `load_target` | `SP_LOAD_FACETS_TARGET`: header/trailer checks, transactional load into `FACETS_TGT` | 7 entities loaded | 55 s |
@@ -230,6 +230,7 @@ So **everything measurable is a rule** the guard enforces; the AI orders the wor
 | Situation | Decided by |
 |---|---|
 | Missing/empty file, 0 rows loaded, > 1 % rows rejected by Snowpipe | rule → quarantine |
+| Any row with a different number of columns than the file header (e.g. an unescaped `\|` in a name) | rule → quarantine |
 | Key column (ids) > 1 % bad, or critical column (DOB, SSN, gender, member names, claim dates/amounts/codes) > 20 % bad | rule → quarantine |
 | Any other column > 20 % bad | **agent** — quarantine, or continue with a logged justification |
 | Empty optional columns (middle initial, modifiers, org vs person names…) | rule → ignored |
@@ -278,6 +279,7 @@ shorten the results.
 | A file is missing or empty | `check_batch_files` fails → rule forces quarantine | QUARANTINED, files in `rejected/` with `_REASON.txt` | Ask the client for the file; upload as a new batch |
 | Snowpipe missed the S3 event | `wait_for_snowpipe` refreshes the pipe after 2 min | continues normally | nothing |
 | File loaded 0 rows (wrong format/name) | `check_load` fails → quarantine | QUARANTINED | fix the file |
+| A row has an extra `\|` (columns shifted) | `check_load` counts fields per line → quarantine | QUARANTINED (BATCH_011: 97 s) | ask the client for a corrected file |
 | Member ids 40 % blank | profiling → key column breach → quarantine (the AI cannot continue) | QUARANTINED | ask the client |
 | A non-key column > 20 % bad | agent decides: quarantine, or continue with a justification per column | either; justification logged | review the justification |
 | dbt errors | guard leaves only `finish_run(NEEDS_HUMAN)` | NEEDS_HUMAN, Airflow task red, batch stays locked in `incoming/` | fix, then `python -m pipeline.steps release BATCH_x` |
@@ -343,7 +345,7 @@ Trigger a specific batch from Airflow: **Trigger DAG w/ config** `{"batch": "BAT
 
 ## Tests
 ```bash
-.venv/bin/python -m tests.test_guard   # 7 rule tests, < 1 s
+.venv/bin/python -m tests.test_guard   # 8 rule tests, < 1 s
 .venv/bin/python -m tests.eval_agent   # 11 scenarios with the real model and scripted tool results (~10 min)
 ```
 Scenarios: clean batch · missing file · 0 rows · bad key column · bad DOB · unused column concern · dbt errors ·
@@ -383,6 +385,11 @@ source tests are filtered to the batch being run.
 - **A new S3 → Snowpipe notification takes minutes to activate**; files uploaded straight away are missed.
   `ALTER PIPE … REFRESH PREFIX = '<batch>/'` (path relative to the pipe) catches up; `wait_for_snowpipe` does it automatically.
 - **A 0-row load "succeeded" end to end** in the original pipeline (wrong file names) — now a hard rule.
+- **Shifted columns load silently.** A test batch with an unescaped `|` in 6 group names (BATCH_010) loaded with
+  "0 rejected": a COPY with a `SELECT` ignores `ERROR_ON_COLUMN_COUNT_MISMATCH`, so the extra field is dropped and
+  every later column moves one place (LOB code = " East Division", effective date = "A"). Profiling saw only 14
+  "minor issues"; a human reviewer rejected it in human mode. Fix: `check_load` now counts the fields on every line
+  (quotes honoured) and any mismatch forces quarantine — the same file as BATCH_011 was quarantined automatically in 97 s.
 - **dbt source tests counted every batch in RAW** (8,000 false duplicate claims) — fixed with a `where: BATCH_ID = …` config.
 - **Two Airflow runs overlapped** despite `max_active_runs=1` — fixed with an atomic S3 lock (`IfNoneMatch="*"`).
 - **A 16 GB Mac running an 8B model swaps hard**; Airflow killed a healthy task. Fewer workers, a 20-minute

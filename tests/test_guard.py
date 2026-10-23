@@ -2,6 +2,7 @@
     .venv/bin/python -m tests.test_guard"""
 from agent.runner import unsupported_numbers
 from agent.tools import Guard, summarise_profile
+from pipeline.steps import column_count_problems
 
 OK = {"ok": True}
 
@@ -81,6 +82,13 @@ def test_summary_number_check():
     evidence = ['{"rows": 3938, "load_pct": 99.09, "entities": [{"loaded": 7875}]}']
     assert unsupported_numbers("Loaded 7,875 claims, 99.09% of 3938 members", evidence) == []
     assert unsupported_numbers("Total rows loaded: 45,854", evidence) == ["45854"]
+
+
+def test_column_count_check():
+    good = 'GROUP_NUMBER|GROUP_NAME|LOB_CODE\nG0001|Keystone|COM\nG0002|"Smith | Sons"|COM\n'
+    assert column_count_problems(good)["bad_rows"] == 0                     # quoted '|' is fine
+    shifted = good + "G0009|Acme Health | East Division|COM\n"
+    assert column_count_problems(shifted) == {"expected_columns": 3, "bad_rows": 1, "examples": [(4, 4)]}
 
 
 if __name__ == "__main__":

@@ -6,6 +6,8 @@ Each function does one thing and returns a plain dict, so it can be used
   - as a tool by the AI agent (step 4).
 Every number comes from S3, Snowflake or dbt - nothing here is guessed.
 """
+import csv
+import io
 import json
 import os
 import re
@@ -242,16 +244,34 @@ def register_batch(batch):
     return _call("SP_REGISTER_S3_BATCH", batch)
 
 
+def column_count_problems(text, delimiter="|"):
+    """Data rows whose field count differs from the header's. Snowpipe cannot catch these: a COPY with a
+    SELECT ignores ERROR_ON_COLUMN_COUNT_MISMATCH, so an unescaped '|' inside a value shifts every later
+    column and the row still loads. Quotes are honoured like the file format (FIELD_OPTIONALLY_ENCLOSED_BY '"')."""
+    rows = csv.reader(io.StringIO(text), delimiter=delimiter, quotechar='"')
+    header = next(rows, [])
+    bad = [(rows.line_num, len(r)) for r in rows if r and len(r) != len(header)]
+    return {"expected_columns": len(header), "bad_rows": len(bad), "examples": bad[:5]}
+
+
 def check_load(batch):
     """Hard rules after loading - these stop the batch whatever the AI thinks:
-    every file loaded rows, and Snowpipe rejected no more than 1% of a file's rows."""
-    status, problems = snowpipe_status(batch), []
+    every file loaded rows, Snowpipe rejected no more than 1% of a file's rows,
+    and every row has the same number of columns as the file's header."""
+    status, problems, client = snowpipe_status(batch), [], s3()
     for s in status:
         if s["rows_in_raw"] == 0:
             problems.append(f"{s['file']}: 0 rows loaded (Snowpipe status {s['snowpipe_status']})")
         elif s["rows_rejected"] and s["rows_parsed"] and s["rows_rejected"] / s["rows_parsed"] > 0.01:
             problems.append(f"{s['file']}: {s['rows_rejected']} of {s['rows_parsed']} rows rejected by Snowpipe "
                             f"({s['first_error']})")
+        body = client.get_object(Bucket=config.S3_BUCKET, Key=f"{INCOMING}{batch}/{s['file']}")["Body"].read()
+        cols = column_count_problems(body.decode("utf-8", errors="replace"))
+        s["rows_wrong_column_count"] = cols["bad_rows"]
+        if cols["bad_rows"]:
+            lines = ", ".join(f"line {n} has {c}" for n, c in cols["examples"])
+            problems.append(f"{s['file']}: {cols['bad_rows']} rows do not have {cols['expected_columns']} columns "
+                            f"({lines}) - columns would be shifted")
     return {"step": "check_load", "batch": batch, "ok": not problems, "problems": problems, "files": status}
 
 
